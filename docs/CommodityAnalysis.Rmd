@@ -1,0 +1,690 @@
+---
+title: "Commodity Analysis"
+author: "Caleb King"
+date: "`r format(Sys.time(),  '%B %d, %Y')`"
+output:
+  pdf_document: default
+fontsize: 12pt
+geometry: margin=1.25cm
+header-includes:
+- \usepackage{amssymb}
+- \usepackage{dsfont}
+- \let\rmarkdownfootnote\footnote%
+- \def\footnote{\protect\rmarkdownfootnote}
+- \usepackage{titling}
+- "\\setlength{\\droptitle}{-2em}"
+- \pretitle{\vspace{\droptitle}\centering\huge}
+- \posttitle{\par}
+- \preauthor{\centering\large\emph}
+- \postauthor{\par}
+- \predate{\centering\large\emph}
+- \postdate{\par}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r, warning=FALSE}
+# Load necessary libraries
+library(tseries)
+library(forecast)
+library(urca)
+library(CommoditiesPackage)
+```
+
+Get data for commodities needed
+
+Monthly Precious Metal
+```{r}
+head(commodityData$iPRECIOUSMET)
+```
+Translate to time series format
+
+Monthly Precious metal
+```{r}
+# Create a time series of Precious metal monthly level
+metalMonth.t <- ts(commodityData$iPRECIOUSMET,start=1960,freq=12 )   
+#transform data
+metalMonth.t <- log(metalMonth.t)
+tail(metalMonth.t) 
+```
+Numerical summary
+
+Sample size
+```{r}
+# Sample size
+n <- length( metalMonth.t )
+n
+```
+
+
+Mean and standard deviation
+```{r}
+mean(metalMonth.t)
+sd(metalMonth.t)
+```
+
+
+Five-number (minimum, 1st quartile, median, 3rd quartile, maximum) summary
+```{r}
+# Five-number (minimum, 1st quartile, median, 3rd quartile, maximum) summary and mean
+summary( metalMonth.t )
+```
+
+
+Visualization
+We use a time plot to visualize a time series
+
+Nominal US dollar term
+```{r}
+# Time plot using plot.ts()
+plot.ts(metalMonth.t, ylim=c(1,6), col="#00AFBB", xlab="Year", ylab="Price", main="Precious Metal Monthly Price log(index)")
+legend("bottomright", legend="Source: World Bank", bty="n", cex=0.8, col="gray40")
+```
+
+
+Test for stationary or not
+```{r}
+adf.test(metalMonth.t, k=12)
+```
+
+
+Sample ACF and PACF of time series data
+```{r}
+# Sample ACF and PACF
+par( mfrow=c(2,1),mex=0.75 )
+acf( metalMonth.t,lag.max=144,ylim=c(-0.5,1),ylab="Sample ACF",main="" )
+pacf( metalMonth.t,lag.max=24,ylim=c(-0.5,1),ylab="Sample PACF",main="" )
+```
+
+
+Taking the differencing for seasonality because it is monthly data
+```{r}
+# Lag-12 differenced series (Note: the sample size is decreased by 12 due to lag-12 differencing)
+x.t_s12 <- diff(metalMonth.t, 12)
+
+# Time plot of lag-12 difference series
+plot.ts( x.t_s12,ylim=c(-2,2),xlab="Year",main="Lag-12 differenced Metal Data" )
+
+# Sample ACF and PACF of lag-12 differenced series
+par( mfrow=c(2,1),mex=0.75 )
+acf( x.t_s12,lag.max=144,ylim=c(-0.5,1),ylab="Sample ACF",main="" )
+pacf( x.t_s12,lag.max=24,ylim=c(-0.5,1),ylab="Sample PACF",main="" )
+```
+
+
+Numerical Summary of Lag-12 differenced data
+```{r}
+# Numerical summary of lag-12 differenced series
+x.t_s12.mean <- mean( x.t_s12 )
+x.t_s12.sd <- sd( x.t_s12 )
+n_s12 <- length( x.t_s12 )
+
+x.t_s12.mean
+x.t_s12.sd
+n_s12
+
+summary( x.t_s12 )
+```
+
+
+Test for Linear trend on differenced data
+```{r}
+# Augmented Dickey-Fuller test for unit roots
+adf.out_0 <- ur.df( x.t_s12,type="drift",lags=0 )         # Augmented Dickey-Fuller test with p=0 ("lags=0")
+summary( adf.out_0 )
+```
+Because the ADF test statistic value -4.284 is less than the 5th percentile critical value -2.86, at  alpha=0.05  significance level, we do reject the null hypothesis  H0 : the series x.t has a unit root. Therefore, it is not supported to apply the lag-1 differencing to the lag-12 differenced series metalMonth.t.
+
+
+Function to compute AICC
+```{r}
+# Function to compute AICC
+arma.AICC <- function(fit) {
+  n.par <- length(fit$coef)-sum((fit$coef==0))     # no of parameters in ARMA fit, corrected for sub-models
+  n <- fit$nobs                                    # sample size
+  aicc <- -2*fit$loglik+2*(n.par+1)*n/(n-n.par-2)  # AICC
+  return(aicc)
+}
+```
+
+
+Fit an appropriate model
+```{r}
+fit_101.210 <- arima(metalMonth.t,order=c(1,0,1),seasonal=list(order=c(2,1,0), period=12))
+fit_101.210
+```
+
+
+Analyze the BIC and AICC values (smaller values are better)
+```{r}
+arma.AICC(fit_101.210)
+BIC(fit_101.210)
+```
+
+
+Create variable for the best fitting data
+```{r}
+fit.bst <- fit_101.210
+```
+
+
+Compute residuals and summary of residuals
+```{r}
+# Residuals
+w.t <- ts( fit.bst$resid[13:n],start=c(1960,1),freq=12 )
+head( w.t )
+
+# Numerical summary of residuals
+w.mean <- mean(w.t)                              # should be close to zero
+w.sd <- sd(w.t)                                  # should be close to sigma
+
+w.mean
+w.sd
+
+summary(w.t)
+```
+
+
+Model diagnostics 
+```{r}
+# Model diagnostics: visual inspection
+par( mfrow=c(3,1),mex=0.75 )
+plot.ts( w.t,ylim=c(min(w.t),max(w.t)),xlab="Year",ylab="Residuals",main="Model Diagnostics" )
+abline( h=0,col="blue" )
+acf( w.t,lag.max=24,ylim=c(-0.5,1),ylab="Sample ACF",main="" )
+pacf( w.t,lag.max=24,ylim=c(-0.5,1),ylab="Sample PACF",main="" )
+```
+
+
+Ljung-Box test
+```{r}
+# Model diagnostics: Ljung-Box portmanteau test (repeat with different m)
+m <- 10                                                           # Ljung-Box portmanteau test's "m"
+n.par <- length(fit.bst$coef)                                     # number of parameters in fitted ARMA(p,q), p+q
+LB.out <- Box.test(w.t,lag=m,type="Ljung-Box")                    # Ljung-Box portmanteau test
+LB.out                                                            # Box.test uses wrong df if applied to residuals
+LB.pval <- pchisq(q=LB.out$statistic,df=m-n.par,lower.tail=FALSE) # correct p-value
+round( LB.pval, 4 )
+```
+
+
+Normality Check
+```{r}
+# Model diagnostics: normality check
+par(mfrow=c(2,1),mex=0.75)
+hist(w.t,freq=FALSE,                                              # histogram of residuals
+     breaks=seq(-1,1,0.05),
+     col="grey85",ylim=c(0,10),
+     main="Residual Histogram")
+z <- seq(-8,8,length=1000)
+lines(z,dnorm(z,mean=w.mean,sd=w.sd),lty=1,col="red")             # add theoretical normal density
+qqnorm(w.t)                                                       # normal Q-Q plot
+qqline(w.t)
+```
+
+
+Normality test (Shapiro-Wilk and Kolmogorov-Smirnov tests)
+```{r}
+# Normality test
+shapiro.test(w.t)                                                 # Shapiro-Wilk normality test
+ks.test(w.t,"pnorm",mean=w.mean,sd=w.sd)                          # Kolmogorov-Smirnov normality test
+```
+
+
+Furure value prediction (Forecast)
+```{r}
+# Forecast 12 future values of original series x.t with 95% PI (only when model diagnostics is passed)
+x.fct <- predict( fit.bst,n.ahead=14 )
+x.L95 <- x.fct$pred-1.96*x.fct$se
+x.U95 <- x.fct$pred+1.96*x.fct$se
+
+par( mfrow=c(1,1), mex=0.75 )
+ts.plot( metalMonth.t,x.fct$pred, col=c("black","tomato"),ylim=c(0,6),xlim=c(2001,2028),
+         main="Monthly Precious Metal Price with 14 Months Predicted" )
+lines( x.U95,col="cyan4",lty="dashed" )
+lines( x.L95,col="cyan4",lty="dashed" )
+legend( "bottom", lty=c("solid","solid","dashed"),
+        legend=c("Actual", "Predicted", "Upper and Lower 95%"), col=c("black", "tomato", "cyan4"))
+```
+
+Monthly Energy
+```{r}
+head(commodityData$iENERGY)
+```
+
+
+Translate to time series format
+
+Monthly Energy
+```{r}
+# Create a time series of Precious energy monthly level
+energyMonth.t <- ts(commodityData$iENERGY,start=1960,freq=12 )   
+#transform data
+energyMonth.t <- log(energyMonth.t)
+tail(energyMonth.t) 
+```
+
+
+Numerical summary
+
+Sample size
+```{r}
+# Sample size
+n <- length( energyMonth.t )
+n
+```
+
+
+Mean and standard deviation
+```{r}
+mean(energyMonth.t)
+sd(energyMonth.t)
+```
+
+
+Five-number (minimum, 1st quartile, median, 3rd quartile, maximum) summary
+```{r}
+# Five-number (minimum, 1st quartile, median, 3rd quartile, maximum) summary and mean
+summary( energyMonth.t )
+```
+
+
+Visualization
+We use a time plot to visualize a time series
+
+Nominal US dollar term
+```{r}
+# Time plot using plot.ts()
+plot.ts(energyMonth.t, ylim=c(0,6), col="#00AFBB", xlab="Year", ylab="Price", main="Precious Energy Monthly Price log(index)")
+legend("bottomright", legend="Source: World Bank", bty="n", cex=0.8, col="gray40")
+```
+
+
+Test for stationary or not
+```{r}
+adf.test(energyMonth.t, k=12)
+```
+
+
+Sample ACF and PACF of time series data
+```{r}
+# Sample ACF and PACF
+par( mfrow=c(2,1),mex=0.75 )
+acf( energyMonth.t,lag.max=144,ylim=c(-0.5,1),ylab="Sample ACF",main="" )
+pacf( energyMonth.t,lag.max=24,ylim=c(-0.5,1),ylab="Sample PACF",main="" )
+```
+
+
+Taking the differencing for seasonality because it is monthly data
+```{r}
+# Lag-12 differenced series (Note: the sample size is decreased by 12 due to lag-12 differencing)
+x.t_s12 <- diff(energyMonth.t, 12)
+
+# Time plot of lag-12 difference series
+plot.ts( x.t_s12,ylim=c(-2,2),xlab="Year",main="Lag-12 differenced Energy Data" )
+
+# Sample ACF and PACF of lag-12 differenced series
+par( mfrow=c(2,1),mex=0.75 )
+acf( x.t_s12,lag.max=144,ylim=c(-0.5,1),ylab="Sample ACF",main="" )
+pacf( x.t_s12,lag.max=24,ylim=c(-0.5,1),ylab="Sample PACF",main="" )
+```
+
+
+Numerical Summary of Lag-12 differenced data
+```{r}
+# Numerical summary of lag-12 differenced series
+x.t_s12.mean <- mean( x.t_s12 )
+x.t_s12.sd <- sd( x.t_s12 )
+n_s12 <- length( x.t_s12 )
+
+x.t_s12.mean
+x.t_s12.sd
+n_s12
+
+summary( x.t_s12 )
+```
+
+
+Test for Linear trend on differenced data
+```{r}
+# Augmented Dickey-Fuller test for unit roots
+adf.out_0 <- ur.df( x.t_s12,type="drift",lags=0 )         # Augmented Dickey-Fuller test with p=0 ("lags=0")
+summary( adf.out_0 )
+```
+Because the ADF test statistic value -4.5813 is less than the 5th percentile critical value -2.86, at  alpha=0.05  significance level, we do reject the null hypothesis  H0 : the series x.t has a unit root. Therefore, it is not supported to apply the lag-1 differencing to the lag-12 differenced series energyMonth.t.
+
+
+Function to compute AICC
+```{r}
+# Function to compute AICC
+arma.AICC <- function(fit) {
+  n.par <- length(fit$coef)-sum((fit$coef==0))     # no of parameters in ARMA fit, corrected for sub-models
+  n <- fit$nobs                                    # sample size
+  aicc <- -2*fit$loglik+2*(n.par+1)*n/(n-n.par-2)  # AICC
+  return(aicc)
+}
+```
+
+
+Fit an appropriate model
+```{r}
+fit_200.210 <- arima(energyMonth.t,order=c(2,0,0),seasonal=list(order=c(2,1,0), period=12))
+fit_200.210
+```
+
+
+Analyze the BIC and AICC values (smaller values are better)
+```{r}
+arma.AICC(fit_200.210)
+BIC(fit_200.210)
+```
+
+
+Create variable for the best fitting data
+```{r}
+fit.bst <- fit_200.210
+```
+
+
+Compute residuals and summary of residuals
+```{r}
+# Residuals
+w.t <- ts( fit.bst$resid[13:n],start=c(1960,1),freq=12 )
+head( w.t )
+
+# Numerical summary of residuals
+w.mean <- mean(w.t)                              # should be close to zero
+w.sd <- sd(w.t)                                  # should be close to sigma
+
+w.mean
+w.sd
+
+summary(w.t)
+```
+
+
+Model diagnostics 
+```{r}
+# Model diagnostics: visual inspection
+par( mfrow=c(3,1),mex=0.75 )
+plot.ts( w.t,ylim=c(min(w.t),max(w.t)),xlab="Year",ylab="Residuals",main="Model Diagnostics" )
+abline( h=0,col="blue" )
+acf( w.t,lag.max=24,ylim=c(-0.5,1),ylab="Sample ACF",main="" )
+pacf( w.t,lag.max=24,ylim=c(-0.5,1),ylab="Sample PACF",main="" )
+```
+
+
+Ljung-Box test
+```{r}
+# Model diagnostics: Ljung-Box portmanteau test (repeat with different m)
+m <- 10                                                           # Ljung-Box portmanteau test's "m"
+n.par <- length(fit.bst$coef)                                     # number of parameters in fitted ARMA(p,q), p+q
+LB.out <- Box.test(w.t,lag=m,type="Ljung-Box")                    # Ljung-Box portmanteau test
+LB.out                                                            # Box.test uses wrong df if applied to residuals
+LB.pval <- pchisq(q=LB.out$statistic,df=m-n.par,lower.tail=FALSE) # correct p-value
+round( LB.pval, 4 )
+```
+
+
+Normality Check
+```{r}
+# Model diagnostics: normality check
+par(mfrow=c(2,1),mex=0.75)
+hist(w.t,freq=FALSE,                                              # histogram of residuals
+     breaks=seq(-1,1,0.05),
+     col="grey85",ylim=c(0,10),
+     main="Residual Histogram")
+z <- seq(-8,8,length=1000)
+lines(z,dnorm(z,mean=w.mean,sd=w.sd),lty=1,col="red")             # add theoretical normal density
+qqnorm(w.t)                                                       # normal Q-Q plot
+qqline(w.t)
+```
+
+
+Normality test (Shapiro-Wilk and Kolmogorov-Smirnov tests)
+```{r}
+# Normality test
+shapiro.test(w.t)                                                 # Shapiro-Wilk normality test
+ks.test(w.t,"pnorm",mean=w.mean,sd=w.sd)                          # Kolmogorov-Smirnov normality test
+```
+
+
+Furure value prediction (Forecast)
+```{r}
+# Forecast 12 future values of original series x.t with 95% PI (only when model diagnostics is passed)
+x.fct <- predict( fit.bst,n.ahead=14 )
+x.L95 <- x.fct$pred-1.96*x.fct$se
+x.U95 <- x.fct$pred+1.96*x.fct$se
+
+par( mfrow=c(1,1), mex=0.75 )
+ts.plot( energyMonth.t,x.fct$pred, col=c("black","tomato"),ylim=c(0,6),xlim=c(2001,2026),
+         main="Monthly Energy Price with 14 Months Predicted" )
+lines( x.U95,col="cyan4",lty="dashed" )
+lines( x.L95,col="cyan4",lty="dashed" )
+legend( "bottom", lty=c("solid","solid","dashed"),
+        legend=c("Actual", "Predicted", "Upper and Lower 95%"), col=c("black", "tomato", "cyan4"))
+```
+
+
+Monthly Precious nonfuel
+```{r}
+head(commodityData$iNONFUEL)
+```
+
+
+Translate to time series format
+
+Monthly Precious nonfuel
+```{r}
+# Create a time series of Precious metal monthly level
+nonfuelMonth.t <- ts(commodityData$iNONFUEL,start=1960,freq=12 )   
+#transform data
+nonfuelMonth.t <- log(nonfuelMonth.t)
+tail(nonfuelMonth.t) 
+```
+
+
+Numerical summary
+
+Sample size
+```{r}
+# Sample size
+n <- length( nonfuelMonth.t )
+n
+```
+
+
+Mean and standard deviation
+```{r}
+mean(nonfuelMonth.t)
+sd(nonfuelMonth.t)
+```
+
+
+Five-number (minimum, 1st quartile, median, 3rd quartile, maximum) summary
+```{r}
+# Five-number (minimum, 1st quartile, median, 3rd quartile, maximum) summary and mean
+summary( nonfuelMonth.t )
+```
+
+
+Visualization
+We use a time plot to visualize a time series
+
+Nominal US dollar term
+```{r}
+# Time plot using plot.ts()
+plot.ts(nonfuelMonth.t, ylim=c(1,6), col="#00AFBB", xlab="Year", ylab="Price", main="Precious nonfuel Monthly Price log(index)")
+legend("bottomright", legend="Source: World Bank", bty="n", cex=0.8, col="gray40")
+```
+
+
+Test for stationary or not
+```{r}
+adf.test(nonfuelMonth.t, k=12)
+```
+
+
+Sample ACF and PACF of time series data
+```{r}
+# Sample ACF and PACF
+par( mfrow=c(2,1),mex=0.75 )
+acf( nonfuelMonth.t,lag.max=144,ylim=c(-0.5,1),ylab="Sample ACF",main="" )
+pacf( nonfuelMonth.t,lag.max=24,ylim=c(-0.5,1),ylab="Sample PACF",main="" )
+```
+
+
+Taking the differencing for seasonality because it is monthly data
+```{r}
+# Lag-12 differenced series (Note: the sample size is decreased by 12 due to lag-12 differencing)
+x.t_s12 <- diff(nonfuelMonth.t, 12)
+
+# Time plot of lag-12 difference series
+plot.ts( x.t_s12,ylim=c(-2,2),xlab="Year",main="Lag-12 differenced Non-Energy Data" )
+
+# Sample ACF and PACF of lag-12 differenced series
+par( mfrow=c(2,1),mex=0.75 )
+acf( x.t_s12,lag.max=144,ylim=c(-0.5,1),ylab="Sample ACF",main="" )
+pacf( x.t_s12,lag.max=24,ylim=c(-0.5,1),ylab="Sample PACF",main="" )
+```
+
+
+Numerical Summary of Lag-12 differenced data
+```{r}
+# Numerical summary of lag-12 differenced series
+x.t_s12.mean <- mean( x.t_s12 )
+x.t_s12.sd <- sd( x.t_s12 )
+n_s12 <- length( x.t_s12 )
+
+x.t_s12.mean
+x.t_s12.sd
+n_s12
+
+summary( x.t_s12 )
+```
+
+
+Test for Linear trend on differenced data
+```{r}
+# Augmented Dickey-Fuller test for unit roots
+adf.out_0 <- ur.df( x.t_s12,type="drift",lags=0 )         # Augmented Dickey-Fuller test with p=0 ("lags=0")
+summary( adf.out_0 )
+```
+Because the ADF test statistic value -4.0586 is less than the 5th percentile critical value -2.86, at  alpha=0.05  significance level, we do reject the null hypothesis  H0 : the series x.t has a unit root. Therefore, it is not supported to apply the lag-1 differencing to the lag-12 differenced series nonfuelMonth.t.
+
+
+Function to compute AICC
+```{r}
+# Function to compute AICC
+arma.AICC <- function(fit) {
+  n.par <- length(fit$coef)-sum((fit$coef==0))     # no of parameters in ARMA fit, corrected for sub-models
+  n <- fit$nobs                                    # sample size
+  aicc <- -2*fit$loglik+2*(n.par+1)*n/(n-n.par-2)  # AICC
+  return(aicc)
+}
+```
+
+
+Fit an appropriate model
+```{r}
+fit_101.210 <- arima(nonfuelMonth.t,order=c(2,0,1),seasonal=list(order=c(2,1,0), period=12))
+fit_101.210
+```
+
+
+Analyze the BIC and AICC values (smaller values are better)
+```{r}
+arma.AICC(fit_101.210)
+BIC(fit_101.210)
+```
+
+
+Create variable for the best fitting data
+```{r}
+fit.bst <- fit_101.210
+```
+
+
+Compute residuals and summary of residuals
+```{r}
+# Residuals
+w.t <- ts( fit.bst$resid[13:n],start=c(1960,1),freq=12 )
+head( w.t )
+
+# Numerical summary of residuals
+w.mean <- mean(w.t)                              # should be close to zero
+w.sd <- sd(w.t)                                  # should be close to sigma
+
+w.mean
+w.sd
+
+summary(w.t)
+```
+
+
+Model diagnostics 
+```{r}
+# Model diagnostics: visual inspection
+par( mfrow=c(3,1),mex=0.75 )
+plot.ts( w.t,ylim=c(min(w.t),max(w.t)),xlab="Year",ylab="Residuals",main="Model Diagnostics" )
+abline( h=0,col="blue" )
+acf( w.t,lag.max=24,ylim=c(-0.5,1),ylab="Sample ACF",main="" )
+pacf( w.t,lag.max=24,ylim=c(-0.5,1),ylab="Sample PACF",main="" )
+```
+
+
+Ljung-Box test
+```{r}
+# Model diagnostics: Ljung-Box portmanteau test (repeat with different m)
+m <- 10                                                           # Ljung-Box portmanteau test's "m"
+n.par <- length(fit.bst$coef)                                     # number of parameters in fitted ARMA(p,q), p+q
+LB.out <- Box.test(w.t,lag=m,type="Ljung-Box")                    # Ljung-Box portmanteau test
+LB.out                                                            # Box.test uses wrong df if applied to residuals
+LB.pval <- pchisq(q=LB.out$statistic,df=m-n.par,lower.tail=FALSE) # correct p-value
+round( LB.pval, 4 )
+```
+
+
+Normality Check
+```{r}
+# Model diagnostics: normality check
+par(mfrow=c(2,1),mex=0.75)
+hist(w.t,freq=FALSE,                                              # histogram of residuals
+     breaks=seq(-1,1,0.05),
+     col="grey85",ylim=c(0,10),
+     main="Residual Histogram")
+z <- seq(-8,8,length=1000)
+lines(z,dnorm(z,mean=w.mean,sd=w.sd),lty=1,col="red")             # add theoretical normal density
+qqnorm(w.t)                                                       # normal Q-Q plot
+qqline(w.t)
+```
+
+
+Normality test (Shapiro-Wilk and Kolmogorov-Smirnov tests)
+```{r}
+# Normality test
+shapiro.test(w.t)                                                 # Shapiro-Wilk normality test
+ks.test(w.t,"pnorm",mean=w.mean,sd=w.sd)                          # Kolmogorov-Smirnov normality test
+```
+
+
+Furure value prediction (Forecast)
+```{r}
+# Forecast 12 future values of original series x.t with 95% PI (only when model diagnostics is passed)
+x.fct <- predict( fit.bst,n.ahead=14 )
+x.L95 <- x.fct$pred-1.96*x.fct$se
+x.U95 <- x.fct$pred+1.96*x.fct$se
+
+par( mfrow=c(1,1), mex=0.75 )
+ts.plot( nonfuelMonth.t,x.fct$pred, col=c("black","tomato"),ylim=c(0,6),xlim=c(2001,2028),
+         main="Monthly nonfuel Price with 14 Months Predicted" )
+lines( x.U95,col="cyan4",lty="dashed" )
+lines( x.L95,col="cyan4",lty="dashed" )
+legend( "bottom", lty=c("solid","solid","dashed"),
+        legend=c("Actual", "Predicted", "Upper and Lower 95%"), col=c("black", "tomato", "cyan4"))
+```
+
+
